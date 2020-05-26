@@ -1,31 +1,18 @@
 #! /bin/sh
-apa
+
 ## Settings
-
-#Dmenu="dmenu"
-CacheTimeout=60
-CacheDirectory="$HOME/.cache/grm"
 RepositoryDirectory="/src"
-#Dmenu="slmenu -l $(tput lines) - 1 ] -p 'Repositories' -t -i"
-Dmenu="slmenu"
-DmenuFlags="-l $(($(tput lines) - 1 )) -p \"Repositories\" -t -i"
-
-
-## Dependencies
-# git
-# Dmenu				(or equivalent)
-# nano				(or other texteditor)
-# sed 				(sed (base-devel))
-# find, xargs		(findutils)
-# mv, mkdir			(gnu coreutils)
-# dirname			( -||- )
-
-
-## Logic
-
-# set default values
-Cmd="${1:-pick}"
+Dmenu="dmenu"
+DmenuFlags=""
+CacheTimeout=60
+CacheDirectory="${XDG_CACHE_HOME-$HOME/.cache}/grm"
+Config="${XDG_CONFIG_HOME-$HOME/.config}/grm/config.sh"
 Editor="${EDITOR:-nano}"
+
+# Load config if present ( will override, settings above )
+[ -f "$Config" ] && source $Config
+
+## Script
 
 updateCache(){
 	mkdir -p "$CacheDirectory"
@@ -35,12 +22,11 @@ updateCache(){
 	xargs -0 dirname > "$CacheDirectory/repos"
 }
 
-case $Cmd in
+case $1 in
 	pick) 
-		updateCache
 		"$Dmenu" $DmenuFlags < "$CacheDirectory/repos"
 		;;
-	clone) # grm clone <URL>
+	clone) # grm clone <URL> TODO check if url is given, otherwise print help
 		TempDir="$CacheDirectory/repo"
 		mkdir -p "$TempDir"
 		if git -C "$TempDir" clone "$2"; then
@@ -74,14 +60,8 @@ case $Cmd in
 	query)
 		updateCache true
 		;;
-	status)
-		# TODO check if any repoitorys has new commits to pull
-		while read -r Path; do # for line in cache
-			LocalHash=$(git -C "$Path" rev-parse HEAD)
-			RemoteHash=$(git -C "$Path" ls-remote -qh | cut -f 1 )
-			#if [ "$LocalHash" = "$RemoteHash" ]; then
-			#	HasUpdates="$HasUpdates\n$repo"
-		done < "$CacheDirectory/repos"
+	version)
+		# TODO print version and licence
 		;;
 	help|*)
 		# print help/usage

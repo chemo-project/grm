@@ -1,0 +1,88 @@
+#! /bin/sh
+apa
+## Settings
+
+#Dmenu="dmenu"
+CacheTimeout=60
+CacheDirectory="$HOME/.cache/grm"
+RepositoryDirectory="/src"
+#Dmenu="slmenu -l $(tput lines) - 1 ] -p 'Repositories' -t -i"
+Dmenu="slmenu"
+DmenuFlags="-l $(($(tput lines) - 1 )) -p \"Repositories\" -t -i"
+
+
+## Dependencies
+# git
+# Dmenu				(or equivalent)
+# nano				(or other texteditor)
+# sed 				(sed (base-devel))
+# find, xargs		(findutils)
+# mv, mkdir			(gnu coreutils)
+# dirname			( -||- )
+
+
+## Logic
+
+# set default values
+Cmd="${1:-pick}"
+Editor="${EDITOR:-nano}"
+
+updateCache(){
+	mkdir -p "$CacheDirectory"
+	# if cache has passed it's timeout nor exists, or passed true, then create/update it
+	find "$CacheDirectory/repos" -mmin "+$CacheTimeout" 2> /dev/null || [ "$1" = true ] && \
+	find "$RepositoryDirectory" -name .git -print0 | \
+	xargs -0 dirname > "$CacheDirectory/repos"
+}
+
+case $Cmd in
+	pick) 
+		updateCache
+		"$Dmenu" $DmenuFlags < "$CacheDirectory/repos"
+		;;
+	clone) # grm clone <URL>
+		TempDir="$CacheDirectory/repo"
+		mkdir -p "$TempDir"
+		if git -C "$TempDir" clone "$2"; then
+			# extract info from url
+			Info=$(echo "$2" | sed -r "s|https?://(.*)/(.*)\.git|\1 \2|")
+			RepoPath=$(echo "$RepositoryDirectory/$Info" | cut -sd ' ' -f 1)
+			# make target directory structure
+			mkdir -p "$RepoPath"
+			# move repo to target destination
+			mv "$TempDir/$(echo "$Info" | cut -sd ' ' -f 2)"  "$RepoPath"
+		fi
+		updateCache
+		;;
+	delete) 
+		Repo=$("$Dmenu" $DmenuFlags < "$CacheDirectory/repos")
+		rm -R "$Repo"
+		# recursivly rm all empty dir included in repos path
+		cd "$RepositoryDirectory" || exit
+		while [ "$Repo" != "." ]; do
+			rm -Rd "$Repo"
+			Repo=$(dirname "$Repo")
+		done
+		updateCache
+		;;
+	configure)
+		# open this file in users EDITOR
+		$Editor "$0"
+		# Update after edit
+		updateCache true
+		;;
+	query)
+		updateCache true
+		;;
+	status)
+		# TODO check if any repoitorys has new commits to pull
+		while read -r Path; do # for line in cache
+			LocalHash=$(git -C "$Path" rev-parse HEAD)
+			RemoteHash=$(git -C "$Path" ls-remote -qh | cut -f 1 )
+			#if [ "$LocalHash" = "$RemoteHash" ]; then
+			#	HasUpdates="$HasUpdates\n$repo"
+		done < "$CacheDirectory/repos"
+		;;
+	help|*)
+		# print help/usage
+esac

@@ -4,29 +4,48 @@
 RepositoryDirectory="/src"
 Dmenu="dmenu"
 DmenuFlags=""
-CacheTimeout=60
+CacheTimeout="60" #minute
 CacheDirectory="${XDG_CACHE_HOME-$HOME/.cache}/grm"
 Config="${XDG_CONFIG_HOME-$HOME/.config}/grm/config.sh"
-Editor="${EDITOR:-nano}"
+Editor="${EDITOR-vi}"
 
-# Load config if present ( will override, settings above )
-[ -f "$Config" ] && source $Config
+### Script
 
-## Script
+## private variables
 
-updateCache(){
-	mkdir -p "$CacheDirectory"
-	# if cache has passed it's timeout nor exists, or passed true, then create/update it
-	find "$CacheDirectory/repos" -mmin "+$CacheTimeout" 2> /dev/null || [ "$1" = true ] && \
-	find "$RepositoryDirectory" -name .git -print0 | \
-	xargs -0 dirname > "$CacheDirectory/repos"
+# set by makefile, during installtion arccording to config.mk
+Version="@VERSION"
+ErrorInvalidUsage="Ivalid usage, see \"man grm\" or \"grm help\""
+
+## Load config if present ( will override, settings above )
+# shellcheck disable=1090
+[ -f "$Config" ] && . "$Config"
+
+checkArgs() { # num of args, optional custom error msg
+	[ "$#" -ne "$1" ] && echo ${2-"$ErrorInvalidUsage"} > /dev/stderr && exit 1
+	return 0
 }
 
+updateCache(){
+	mkdir -p "$CacheDirectory" || exit 2
+	# if cache has passed it's timeout nor exists, or passed true, then create/update it
+	if ! find "$CacheDirectory/repos" -mmin "-$CacheTimeout" 2> /dev/null || [ "$1" = true ]; then	
+		find "$RepositoryDirectory" -name .git -print0 | \
+		xargs -0 dirname > "$CacheDirectory/repos" || exit 2
+	fi
+	return 0
+}
+# Switch on command given as first argument
 case $1 in
-	pick) 
-		"$Dmenu" $DmenuFlags < "$CacheDirectory/repos"
+	pick) checkArgs 1
+		# shellcheck disable=2086
+		updateCache && "$Dmenu" $DmenuFlags < "$CacheDirectory/repos" || exit 4
 		;;
-	clone) # grm clone <URL> TODO check if url is given, otherwise print help
+	clone) checkArgs 2 # grm clone <URL>
+		# TODO Test for vaild url, instead of just missing
+		[ -z "$2" ] || echo "error: URL missing in \"grm clone <URL>, see \"man grm\" or \"grm help\"" \
+		> /dev/stderr && exit 1
+		
 		TempDir="$CacheDirectory/repo"
 		mkdir -p "$TempDir"
 		if git -C "$TempDir" clone "$2"; then
@@ -37,32 +56,46 @@ case $1 in
 			mkdir -p "$RepoPath"
 			# move repo to target destination
 			mv "$TempDir/$(echo "$Info" | cut -sd ' ' -f 2)"  "$RepoPath"
-		fi
-		updateCache
+			updateCache
+			exit 0
+		fi; exit 3
 		;;
-	delete) 
-		Repo=$("$Dmenu" $DmenuFlags < "$CacheDirectory/repos")
+	delete) checkArgs 1
+		# check if given args match else exit
+		[ "$#" -ne "1" ] && echo "$ErrorInvalidUsage" > /dev/stderr && exit 1
+		
+		# shellcheck disable=2086
+		Repo=$(updateCache && "$Dmenu" $DmenuFlags < "$CacheDirectory/repos" || exit 4)
 		rm -R "$Repo"
 		# recursivly rm all empty dir included in repos path
-		cd "$RepositoryDirectory" || exit
+		cd "$RepositoryDirectory" || exit 2
 		while [ "$Repo" != "." ]; do
 			rm -Rd "$Repo"
 			Repo=$(dirname "$Repo")
 		done
 		updateCache
 		;;
-	configure)
-		# open this file in users EDITOR
-		$Editor "$0"
-		# Update after edit
+	configure) checkArgs 1
+		# if config does'nt exist, create it with global defaults
+		if ! [ -f "$Config" ]; then writeConfig() {
+			echo "RepositoryDirectory=\"$RepositoryDirectory\""
+			echo "Dmenu=\"$Dmenu\""
+			echo "DmenuFlags=\"$DmenuFlags\""
+			echo "CacheTimeout=\"$CacheTimeout\" #minutes"
+			echo "CacheDirectory=\"$CacheDirectory\""
+			echo "Config=\"$Config\""
+			echo "Editor=\"$Editor\""
+		}; writeConfig > "$Config" || exit 2
+		fi
+		# open config in text editor, and then update cache
+		$Editor "$Config" || exit 2
 		updateCache true
 		;;
-	query)
-		updateCache true
-		;;
-	version)
-		# TODO print version and licence
-		;;
-	help|*)
+	query)		checkArgs 1 ; updateCache true ;;
+	version)	checkArgs 1 ; echo "grm v$($Version) - MIT License, Copyright (c) 2020 chemo-project" ;;
+	help)
 		# print help/usage
+	;;
+	*) checkargs -1 # allways trigger, invalid usage
 esac
+exit 0

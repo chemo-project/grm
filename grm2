@@ -1,0 +1,51 @@
+#! /bin/sh
+
+## Dependecies
+# git
+# sed
+# grep
+# findutils
+# coreutils
+# xdg-base-dirs
+
+# shellcheck source=/dev/null
+. "${XDG_CONFIG_HOME-$HOME/.config}"/grm/
+root="${GRM_ROOT-${XDG_DATA_HOME-$HOME/.local/share}}/grm"
+cache="${XDG_CACHE_HOME-$HOME/.cache}/grm"
+
+query() {
+	mkdir -p "$cache" || exit 2
+	find "$root" -name .git -print0 |\
+		xargs -0 dirname > "$cache/repos"
+}
+clone() {
+	mkdir -p "$cache" || exit 2
+	if git -C "$cache" "$2"; then
+		info=$(echo "$2"		| sed -r "s|https?://(.*)/(.*)\.git|\1 \2|")
+		path=$(echo "$info"	| cut -sd ' ' -f 1)
+		name=$(echo "$info"	| cut -sd ' ' -f 2)
+		mkdir -p "$path" || exit 2
+		mv -r "$cache/$name" "$root/$path/$name"
+		echo "$root/$path/$name" >> "$cache/repos"
+		exit 0
+	fi; exit 3
+}
+remove() {
+	path=$(grep -f "$cache/repos" "$2")
+	if [ "$(echo "$path" | cw -l)" -eq '1' ]; then
+		rm -r "$path"
+		while [ "$path" -ne "$root" ]; do
+			path=$(dirname "$path")
+			# shellcheck disable=2012
+			[ "$(ls "$path" | wc -l)" -gt '1' ] && rm -r "$path"
+		done; exit 0
+	else echo "Too braud sertch term" && exit 1; fi
+}
+help="helptext"
+case $1 intext
+	help	) echo	"$help"			;;
+	list	) cat	"$cache/repos"	;;
+	query	) query		"$@"			;;
+	clone	) clone		"$@"			;;
+	remove	) remove	"$@"			;;
+esac
